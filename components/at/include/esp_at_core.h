@@ -366,6 +366,11 @@ bool esp_at_user_cmd_regist(void);
  * @brief regist at wifi command set. If not,you can not use AT wifi command
  *
  */
+bool esp_at_rhzl_cmd_regist(void);
+/**
+ * @brief regist at rhzl command set. If not,you can not use AT rhzl command
+ *
+ */
 bool esp_at_wifi_cmd_regist(void);
 /**
  * @brief regist at net command set. If not,you can not use AT net command

@@ -31,6 +31,7 @@
 #include "esp_at.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "esp_log.h"
 
 #ifdef CONFIG_AT_BASE_ON_UART
 #include "esp_system.h"
@@ -159,7 +160,57 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
             return -1;
         }
     } else {
-        return uart_read_bytes(esp_at_uart_port,buf,len,ticks_to_wait);
+        len = uart_read_bytes(esp_at_uart_port,buf,len,ticks_to_wait);
+        // for special handle, fuck zhida
+        char *p = NULL;
+        uint8_t tmp[128] = {0};
+
+        memcpy(tmp, buf, len);
+        ESP_LOGI("UART", "len: %d, rev: %s\r\n", len, tmp);
+        #define AT_CMD_SETWLAN "AT+SETWLAN="
+        #define AT_CMD_SETNET "AT+SETNET="
+        #define AT_CMD_ECHO "AT+ECHO="
+        #define AT_CMD_RESET "AT+RESET"
+        if (!strncmp(AT_CMD_SETWLAN, (const char*)tmp, strlen(AT_CMD_SETWLAN))) {
+            p = strtok((char*)tmp + strlen(AT_CMD_SETWLAN), ",");
+            ESP_LOGI("UART", "SSID:%s", p);
+            memset(buf, 0, len);
+            sprintf((char*)buf, AT_CMD_SETWLAN"\"%s\",\"%s\"\r\n", p, strtok(NULL, "\r\n"));
+            len = strlen((char *)buf);
+            ESP_LOGI("UART", "CMD:%s, len:%d", buf, len);
+        } else if (!strncmp(AT_CMD_SETNET, (const char*)tmp, strlen(AT_CMD_SETNET))) {
+            p = strtok((char*)tmp + strlen(AT_CMD_SETNET) + 4, ",");
+            ESP_LOGI("UART", "IP:%s", p);
+            memset(buf, 0, len);
+            sprintf((char*)buf, AT_CMD_SETNET"0,0,""\"%s\",%s\r\n", p, strtok(NULL, "\r\n"));
+            len = strlen((char *)buf);
+            ESP_LOGI("UART", "CMD:%s, len:%d", buf, len);
+        } else if (!strncmp(AT_CMD_ECHO, (const char*)tmp, strlen(AT_CMD_ECHO))) {
+            p = strtok((char*)tmp + strlen(AT_CMD_ECHO), "=");
+            memset(buf, 0, len);
+            switch(atoi(p)) {
+                case 0:
+                    strcpy((char *)buf, "ATE0\r\n");
+                    len = strlen("ATE0\r\n");
+                    break;
+                case 1:
+                    strcpy((char *)buf, "ATE1\r\n");
+                    len = strlen("ATE1\r\n");
+                    break;
+                default:
+                    return -1;
+                    break;
+            }
+        #if 0
+        } else if (!strncmp(AT_CMD_RESET, (const char*)tmp, strlen(AT_CMD_RESET))) {
+            memset(buf, 0, len);
+            strcpy((char *)buf, "AT+RST\r\n");
+            len = strlen("AT+RST\r\n");
+        #endif
+        } else {
+            //ESP_LOGI("UART", "Invaild paraments");
+        }
+        return len;
     }
 }
 
