@@ -122,6 +122,7 @@ void app_main()
 #endif
 
     nvs_flash_init();
+    ESP_ERROR_CHECK(esp_netif_init());
 // A workaround to avoid compilation warning (deprecated API: tcpip_adapter_init)
 // TODO: esp-at should remove it after v2.2.0.0
 #pragma GCC diagnostic push
@@ -156,15 +157,15 @@ void app_main()
     }
 #endif
 
-#ifdef CONFIG_AT_RHZL_COMMAND_SUPPORT
-    if (esp_at_rhzl_cmd_regist() == false) {
-        printf("regist rhzl cmd fail\r\n");
-    }
-#endif
-
 #ifdef CONFIG_AT_WIFI_COMMAND_SUPPORT
     if(esp_at_wifi_cmd_regist() == false) {
         printf("regist wifi cmd fail\r\n");
+    }
+#endif
+
+#ifdef CONFIG_AT_RHZL_COMMAND_SUPPORT
+    if (esp_at_rhzl_cmd_regist() == false) {
+        printf("regist rhzl cmd fail\r\n");
     }
 #endif
 
@@ -311,4 +312,6 @@ void app_main()
 #endif
 
     at_custom_init();
+
+    esp_at_rhzl_init();
 }

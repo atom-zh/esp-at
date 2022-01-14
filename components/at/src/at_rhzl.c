@@ -51,8 +51,18 @@
 #define EXAMPLE_ESP_WIFI_SSID      "Hoisting"
 #define EXAMPLE_ESP_WIFI_PASS      "jx999999"
 #define EXAMPLE_ESP_MAXIMUM_RETRY   10
+#define TEMP_BUFFER_SIZE    128
 
 static const char *TAG = "rhat";
+static const char *payload = "WLT_ESP32_Zhida_Z13\r\nSV:84.10.0\r\n";
+static const char *defautl_host = "192.168.3.177";
+static const char *ATE0 = "ATE0\r\n";
+static int s_retry_num = 0;
+int32_t port = 5588;
+uint8_t *ip_addr = NULL;
+uint8_t *ssid = (uint8_t *)EXAMPLE_ESP_WIFI_SSID, *passwd = (uint8_t *)EXAMPLE_ESP_WIFI_PASS;
+net_para net;
+
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -62,52 +72,69 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static int s_retry_num = 0;
+static uint8_t at_set_default_netcfg(void)
+{
+    strcpy((char *)&net.ip, (const char *)defautl_host);
+    net.port = port;
+    // creat socket
+    ESP_LOGI(TAG, "Set default net: %s, port %d\n", net.ip, net.port);
+    socket_open(&net);
+    return ESP_AT_RESULT_CODE_OK;
+}
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGE(TAG, "retry to connect to the AP");
-        } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-        }
-        ESP_LOGE(TAG,"connect to the AP fail");
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    uint8_t out_str[128] = {0};
+    if (event_base == WIFI_EVENT) {
+            switch(event_id) {
+                case WIFI_EVENT_STA_START:
+                    esp_wifi_connect();
+                    break;
+                case WIFI_EVENT_STA_CONNECTED:
+                    esp_at_rhzl_write_data((uint8_t *)"+IND=WICI\r\n", strlen("+IND=WICI\r\n"));
+                    break;
+                case WIFI_EVENT_STA_DISCONNECTED:
+                    esp_at_rhzl_write_data((uint8_t *)"+IND=WIDI,200\r\n", strlen("+IND=WIDI,200\r\n"));
+                    if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
+                        esp_wifi_connect();
+                        s_retry_num++;
+                        ESP_LOGE(TAG, "retry to connect to the AP");
+                    } else {
+                        xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+                    }
+                    ESP_LOGE(TAG,"connect to the AP fail");
+                    break;
+                default:
+                    break;
+            }
+    } else if (event_base == IP_EVENT) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGE(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
-        s_retry_num = 0;
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    }
-}
+        switch(event_id) {
+                case IP_EVENT_STA_GOT_IP:
+                    sprintf((char *)out_str, "+IND=GTIP,"IPSTR"\r\n", IP2STR(&event->ip_info.ip));
+                    ESP_LOGI(TAG, "%s", out_str);
 
-static uint8_t at_query_wlan(uint8_t *cmd_name)
-{
-    ESP_LOGE(TAG, "at_query_cmd_wlan");
-#define TEMP_BUFFER_SIZE    32
-    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
-    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "%s: RHZL test\r\n", cmd_name);
-    esp_at_port_write_data(buffer, strlen((char *)buffer));
-    return ESP_AT_RESULT_CODE_OK;
+                    s_retry_num = 0;
+                    xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+                    esp_at_rhzl_write_data((uint8_t *)out_str, strlen((char *)out_str));
+                    vTaskDelay(500 / portTICK_PERIOD_MS);
+                    at_set_default_netcfg();
+                    break;
+                case IP_EVENT_STA_LOST_IP:
+                    esp_at_rhzl_write_data((uint8_t *)"+IND=LOSIP\r\n", strlen("+IND=LOSIP\r\n"));
+                    break;
+                default:
+                    break;
+        }
+    }
 }
 
 esp_event_handler_instance_t instance_any_id;
 esp_event_handler_instance_t instance_got_ip;
-static uint8_t at_setup_wlan(uint8_t para_num)
+
+static uint8_t at_event_register_call(void)
 {
-    int32_t cnt = 0;
-    uint8_t *ssid = NULL, *passwd = NULL;
-    wifi_config_t wifi_config = {0};
-
-    ESP_LOGI(TAG, "at_setup_wlan");
-
-    esp_wifi_stop();
-
     s_wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
@@ -120,7 +147,37 @@ static uint8_t at_setup_wlan(uint8_t para_num)
                                                         NULL,
                                                         &instance_got_ip));
 
+    return 0;
+}
 
+uint8_t esp_at_rhzl_init(void)
+{
+    esp_at_port_read_data((uint8_t *)ATE0, strlen(ATE0));
+    esp_at_rhzl_write_data((uint8_t *)payload, strlen(payload));
+    at_event_register_call();
+
+    return 0;
+}
+
+static uint8_t at_query_wlan(uint8_t *cmd_name)
+{
+    ESP_LOGE(TAG, "at_query_cmd_wlan");
+
+    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "%s: RHZL test\r\n", cmd_name);
+    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
+    return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setup_wlan(uint8_t para_num)
+{
+    int32_t cnt = 0;
+    wifi_config_t wifi_config = {0};
+
+    ESP_LOGI(TAG, "at_setup_wlan");
+
+    esp_wifi_stop();
+    //at_event_register_call();
     if (esp_at_get_para_as_str(cnt++, &ssid) != ESP_AT_PARA_PARSE_RESULT_OK) {
         ESP_LOGE(TAG, "Failed to get ssid: %s", ssid);
         return ESP_AT_RESULT_CODE_ERROR;
@@ -172,6 +229,17 @@ static uint8_t at_setup_wlan(uint8_t para_num)
     return ESP_AT_RESULT_CODE_OK;
 }
 
+static uint8_t at_exec_getwlan(uint8_t *cmd_name)
+{
+    ESP_LOGI(TAG, "getwlan SSID:%s password:%s",
+                 ssid, passwd);
+
+    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=%s,%s\r\n", ssid, passwd);
+    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
+    return ESP_AT_RESULT_CODE_OK;
+}
+
 static uint8_t at_exec_stopwlan(uint8_t *cmd_name)
 {
     /* The event will not be processed after unregister */
@@ -185,9 +253,6 @@ static uint8_t at_exec_stopwlan(uint8_t *cmd_name)
 static uint8_t at_setup_setnet(uint8_t para_num)
 {
     int cnt = 2;  //ignore the first of 2
-    uint8_t *ip_addr = NULL;
-    int32_t port = 0;
-    net_para net;
 
     if (esp_at_get_para_as_str(cnt++, &ip_addr) != ESP_AT_PARA_PARSE_RESULT_OK) {
         ESP_LOGE(TAG, "Failed to get ip_addr: %s", ip_addr);
@@ -207,13 +272,13 @@ static uint8_t at_setup_setnet(uint8_t para_num)
     return ESP_AT_RESULT_CODE_OK;
 }
 
-static uint8_t at_query_getnet(uint8_t *cmd_name)
+static uint8_t at_exec_getnet(uint8_t *cmd_name)
 {
-    ESP_LOGE(TAG, "at_query_getnet");
-#define TEMP_BUFFER_SIZE    32
     uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
-    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "%s: RHZL test\r\n", cmd_name);
-    esp_at_port_write_data(buffer, strlen((char *)buffer));
+
+    ESP_LOGI(TAG, "Get net: %s, port %d\n", ip_addr, port);
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=0,0,%s,%d\r\n", ip_addr, port);
+    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
     return ESP_AT_RESULT_CODE_OK;
 }
 
@@ -231,24 +296,24 @@ static uint8_t at_setup_netsend(uint8_t para_num)
     int32_t cnt = 0;
     TickType_t ticks_to_wait = 1000*10;
 
-    if (para_num == 1) {
-        if (esp_at_get_para_as_digit(cnt++, &len) != ESP_AT_PARA_PARSE_RESULT_OK) {
-            ESP_LOGE(TAG, "Failed to get data len: %d\r\n", len);
-            return ESP_AT_RESULT_CODE_ERROR;
-        }
-        ESP_LOGI(TAG, "Get net data len: %d\r\n", len);
+    if (esp_at_get_para_as_digit(cnt++, &len) != ESP_AT_PARA_PARSE_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to get data len: %d\r\n", len);
+        return ESP_AT_RESULT_CODE_ERROR;
+    }
+    ESP_LOGI(TAG, "Get net data len: %d\r\n", len);
 
+    if (para_num == 1) {
         data = (uint8_t *)malloc(len);
         if (!data) {
             ESP_LOGE(TAG, "malloc read buf failed\r\n");
             return ESP_AT_RESULT_CODE_ERROR;
         }
-        ESP_LOGI(TAG, "Next to read data\r\n");
+
         len = uart_read_bytes(UART_NUM_1, data, len, ticks_to_wait);
         ESP_LOGI(TAG, "Next to send data\r\n");
         if (tcp_send_data((char *)data, len) < 0) {
-            free(data);
             ESP_LOGE(TAG, "send tcp data failed\r\n");
+            free(data);
             return ESP_AT_RESULT_CODE_ERROR;
         }
         free(data);
@@ -305,7 +370,7 @@ static uint8_t at_exec_wifiscan(uint8_t *cmd_name)
         sprintf((char *)ap_info_buf, "[%2d] SSID: %-33s\tSIG:%4d\tMAC: %02x:%02x:%02x:%02x:%02x:%02x\n", i, ap_records[i].ssid, \
                 ap_records[i].rssi, MAC2STR(ap_records[i].bssid));
         ESP_LOGI(TAG, "%s", ap_info_buf);
-        esp_at_port_write_data(ap_info_buf, strlen((char*)ap_info_buf));
+        esp_at_rhzl_write_data(ap_info_buf, strlen((char*)ap_info_buf));
     }
 
     free(ap_records);
@@ -314,21 +379,21 @@ static uint8_t at_exec_wifiscan(uint8_t *cmd_name)
 
 static uint8_t at_exec_reset(uint8_t *cmd_name)
 {
-    ESP_LOGI(TAG, "Reset ...");
-    esp_cpu_reset(0);
-    esp_cpu_reset(1);
+    ESP_LOGI(TAG, "Reboot ...");
+    esp_restart();
     return ESP_AT_RESULT_CODE_OK;
 }
 
 static const esp_at_cmd_struct s_at_rhzl_cmd[] = {
     {"+SETWLAN",            NULL, at_query_wlan, at_setup_wlan, NULL},      // set ssid & password of wlan
+    {"+GETWLAN",            NULL, NULL, NULL, at_exec_getwlan},             // set ssid & password of wlan
     {"+STOPWLAN",           NULL, NULL, NULL, at_exec_stopwlan},            // close wlan
     {"+SETNET",             NULL, NULL, at_setup_setnet, NULL},             // set host IP & Port
-    {"+GETNET",             NULL, at_query_getnet, NULL, NULL},             // get net para
+    {"+GETNET",             NULL, NULL, NULL, at_exec_getnet},              // get net para
     {"+STOPNET",            NULL, NULL, NULL, at_exec_stopnet},             // close power on auto connect
     {"+NETSEND",            NULL, NULL, at_setup_netsend, NULL},            // send socket data
     {"+CLOSESOCKET",        NULL, NULL, NULL, at_exec_closesocket},         // close socket connect
-    {"+WIFISTARTSCANNING",  NULL, NULL, NULL, at_exec_wifiscan},               // scan ap list
+    {"+WIFISTARTSCANNING",  NULL, NULL, NULL, at_exec_wifiscan},            // scan ap list
     {"+RESET",              NULL, NULL, NULL, at_exec_reset},               // reset
 };
 
@@ -336,5 +401,4 @@ bool esp_at_rhzl_cmd_regist(void)
 {
     return esp_at_custom_cmd_array_regist(s_at_rhzl_cmd, sizeof(s_at_rhzl_cmd) / sizeof(s_at_rhzl_cmd[0]));
 }
-
 #endif

@@ -125,7 +125,19 @@ static int32_t at_port_write_data(uint8_t*data,int32_t len)
 {
     uint32_t length = 0;
 
-    length = uart_write_bytes(esp_at_uart_port,(char*)data,len);
+    ESP_LOGI("UART", "O: %s", data);
+    #if 0
+    #define STR_WIFI_STATE "WIFI "
+    #define STR_OK "OK"
+
+    if (!strncmp((const char*)data, (const char*)STR_WIFI_STATE, strlen(STR_WIFI_STATE)) || \
+        !strncmp((const char*)data, (const char*)STR_OK, strlen(STR_OK)) )
+        return 0;
+    #endif
+
+    //if (strncmp((const char*)data, (const char*)"+IND", strlen("+IND")))
+    //    return 0;
+    //length = uart_write_bytes(esp_at_uart_port,(char*)data,len);
     return length;
 }
 
@@ -160,17 +172,23 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
             return -1;
         }
     } else {
-        len = uart_read_bytes(esp_at_uart_port,buf,len,ticks_to_wait);
+
+        len = uart_read_bytes(esp_at_uart_port,buf,len,ticks_to_wait*10);
         // for special handle, fuck zhida
         char *p = NULL;
-        uint8_t tmp[128] = {0};
+        uint8_t tmp[256] = {0};
+        uint8_t *net_data = NULL;
+        uint32_t net_len = 0;
+        int i = 0;
+        int remain_len = 0;
 
         memcpy(tmp, buf, len);
-        ESP_LOGI("UART", "len: %d, rev: %s\r\n", len, tmp);
+        ESP_LOGI("UART", "len: %d\r\n", len);
         #define AT_CMD_SETWLAN "AT+SETWLAN="
         #define AT_CMD_SETNET "AT+SETNET="
         #define AT_CMD_ECHO "AT+ECHO="
         #define AT_CMD_RESET "AT+RESET"
+        #define AT_CMD_NETSEND "AT+NETSEND="
         if (!strncmp(AT_CMD_SETWLAN, (const char*)tmp, strlen(AT_CMD_SETWLAN))) {
             p = strtok((char*)tmp + strlen(AT_CMD_SETWLAN), ",");
             ESP_LOGI("UART", "SSID:%s", p);
@@ -183,6 +201,42 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
             ESP_LOGI("UART", "IP:%s", p);
             memset(buf, 0, len);
             sprintf((char*)buf, AT_CMD_SETNET"0,0,""\"%s\",%s\r\n", p, strtok(NULL, "\r\n"));
+            len = strlen((char *)buf);
+            ESP_LOGI("UART", "CMD:%s, len:%d", buf, len);
+        } else if (!strncmp(AT_CMD_NETSEND, (const char*)tmp, strlen(AT_CMD_NETSEND))) {
+            p = strtok((char*)tmp + strlen(AT_CMD_NETSEND), "\n");
+            net_len = atoi(p);
+            remain_len = net_len + strlen(AT_CMD_NETSEND) + strlen(p) + 1 - len;
+            ESP_LOGI("UART", "net len %d, remain_len %d", net_len, remain_len);
+            p = strtok(NULL, "");
+
+            if (p) {
+                net_data = (uint8_t *)malloc(net_len);
+                memcpy((void *)net_data, (void *)p, net_len);
+                if (!net_data) {
+                    ESP_LOGE("UART", "malloc read buf failed\r\n");
+                    return ESP_AT_RESULT_CODE_ERROR;
+                }
+
+                if ( remain_len > 0) {
+                    memset(buf, 0, len);
+                    ESP_LOGI("UART", "Get remain data");
+                    len = uart_read_bytes(esp_at_uart_port, buf, remain_len, ticks_to_wait*100);
+                    memcpy((void *)net_data + net_len - remain_len, (void *)buf, remain_len);
+                }
+
+                for(i = 0; i < net_len; i++)
+                    ESP_LOGI("I Data:", "%02X", net_data[i]);
+                tcp_send_data((char *)net_data, net_len);
+                ESP_LOGI("UART", "Sent to host ok");
+                memset(buf, 0, len);
+                //sprintf((char*)buf, AT_CMD_NETSEND"\r\n");
+                free(net_data);
+            } else {
+                memset(buf, 0, len);
+                sprintf((char*)buf, AT_CMD_NETSEND"%d\r\n", net_len);
+            }
+
             len = strlen((char *)buf);
             ESP_LOGI("UART", "CMD:%s, len:%d", buf, len);
         } else if (!strncmp(AT_CMD_ECHO, (const char*)tmp, strlen(AT_CMD_ECHO))) {

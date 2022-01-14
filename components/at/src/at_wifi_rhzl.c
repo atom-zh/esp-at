@@ -21,34 +21,45 @@
 #include "lwip/sockets.h"
 #include "at_wifi_rhzl.h"
 #include "driver/uart.h"
-
-#define HOST_IP_ADDR "192.168.3.72"
-#define PORT 8080
+#include "esp_at_core.h"
 
 static const char *TAG = "wifi";
-static const char *payload = "WLT_ESP32_Zhida_Z13\n";
+static const char *payload = "WLT_ESP32_Zhida_Z13\r\nSV:84.10.0\r\n";
 
 int socket_handle = 0;
+
+int32_t esp_at_rhzl_write_data(uint8_t*data, int32_t len)
+{
+    uint32_t length = 0;
+
+    ESP_LOGI(TAG, "O: %s", data);
+    length = uart_write_bytes(UART_NUM_1,(char*)data, len);
+    return length;
+}
 
 static void tcp_heartbeat_task(void *pvParameters)
 {
     while(1) {
         // send to host
+        #if 0
         int err = send(socket_handle, payload, strlen(payload), 0);
         if (err < 0) {
             ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-        } else {
-            // send to mcu
-            uart_write_bytes(UART_NUM_1, (char *)payload, strlen(payload));
+            break;
         }
+        #endif
 
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        // send to mcu
+        //esp_at_rhzl_write_data((uint8_t *)payload, strlen(payload));
+
+        vTaskDelay(20000 / portTICK_PERIOD_MS);
     }
+    vTaskDelete(NULL);
 }
 
 int tcp_send_data(char *data, int32_t len)
 {
-    // send to host
+    // send to host, flag MSG_DONTWAIT
     int err = send(socket_handle, data, len, 0);
     if (err < 0) {
         ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
@@ -66,12 +77,18 @@ int tcp_close_socket(void)
 
 static void tcp_client_task(void *pvParameters)
 {
-    char rx_buffer[128];
-    char host_ip[16] = {0};
-    int32_t port;
+    #define OUT_CMD_BUFFER_LEN (256+32)
+    uint8_t rx_buffer[256] = {0};
+    uint8_t indx_buffer[32] = {0};
+    uint8_t out_buffer[OUT_CMD_BUFFER_LEN] = {0};
+    static char host_ip[16] = {0};
+    static int32_t port;
     int addr_family = 0;
     int ip_protocol = 0;
+    int i = 0;
     net_para *net = pvParameters;
+
+    //tcp_close_socket();
 
     strcpy(host_ip, (void *)net->ip);
     port = net->port;
@@ -97,23 +114,36 @@ static void tcp_client_task(void *pvParameters)
             ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
             break;
         }
+
         ESP_LOGI(TAG, "Successfully connected");
+        sprintf((char *)out_buffer, "+IND=TCPC,%s,%d\r\n", host_ip, port);
+        esp_at_rhzl_write_data(out_buffer, strlen((char *)out_buffer));
 
-        xTaskCreate(tcp_heartbeat_task, "tcp_heartbeat", 2048, NULL, 6, NULL);
         while (1) {
-
+            xTaskCreate(tcp_heartbeat_task, "tcp_heartbeat", 2048, NULL, 6, NULL);
             int len = recv(socket_handle, rx_buffer, sizeof(rx_buffer) - 1, 0);
             // Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recv failed: errno %d", errno);
+                esp_at_rhzl_write_data((uint8_t *)"+IND=TCPD\r\n", strlen("+IND=TCPD\r\n"));
                 break;
-            }
-            // Data received
-            else {
+            } else {
+                // Data received
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
                 ESP_LOGI(TAG, "Received %d bytes from %s:", len, host_ip);
                 ESP_LOGI(TAG, "%s", rx_buffer);
-                uart_write_bytes(UART_NUM_1, (char *)rx_buffer, len);
+                if (len == 0)
+                    continue;
+
+                memset((void *)out_buffer, 0, OUT_CMD_BUFFER_LEN);
+                memset((void *)indx_buffer, 0, 32);
+                sprintf((char *)indx_buffer, "+IND=RNET,%d,", len);
+                memcpy((void *)out_buffer, indx_buffer, strlen((char *)indx_buffer));
+                memcpy((void *)out_buffer + strlen((char *)indx_buffer), rx_buffer, len);
+                len += strlen((char *)indx_buffer);
+                for(i = 0; i < len; i++)
+                    ESP_LOGI("O Data:", "%02X", out_buffer[i]);
+                esp_at_rhzl_write_data(out_buffer, len);
             }
         }
 
@@ -149,14 +179,11 @@ void ap_record_sort_by_rssi(wifi_ap_record_t *ap_record_array, int len)
 
 int socket_open(net_para *net)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
-
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
      * Read "Establishing Wi-Fi or Ethernet Connection" section in
      * examples/protocols/README.md for more information about this function.
      */
     //ESP_ERROR_CHECK(example_connect());
-
     xTaskCreate(tcp_client_task, "tcp_client", 4096, net, 5, NULL);
 
     return 0;
