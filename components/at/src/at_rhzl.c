@@ -310,7 +310,7 @@ static uint8_t at_setup_netsend(uint8_t para_num)
         }
 
         len = uart_read_bytes(UART_NUM_1, data, len, ticks_to_wait);
-        ESP_LOGI(TAG, "Next to send data\r\n");
+        ESP_LOGI(TAG, "Next to send data, read len = %d", len);
         if (tcp_send_data((char *)data, len) < 0) {
             ESP_LOGE(TAG, "send tcp data failed\r\n");
             free(data);
@@ -386,7 +386,7 @@ static uint8_t at_exec_reset(uint8_t *cmd_name)
 
 static const esp_at_cmd_struct s_at_rhzl_cmd[] = {
     {"+SETWLAN",            NULL, at_query_wlan, at_setup_wlan, NULL},      // set ssid & password of wlan
-    {"+GETWLAN",            NULL, NULL, NULL, at_exec_getwlan},             // set ssid & password of wlan
+    {"+GETWLAN",            NULL, NULL, NULL, at_exec_getwlan},             // get ssid & password of wlan
     {"+STOPWLAN",           NULL, NULL, NULL, at_exec_stopwlan},            // close wlan
     {"+SETNET",             NULL, NULL, at_setup_setnet, NULL},             // set host IP & Port
     {"+GETNET",             NULL, NULL, NULL, at_exec_getnet},              // get net para

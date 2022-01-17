@@ -172,23 +172,44 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
             return -1;
         }
     } else {
-
-        len = uart_read_bytes(esp_at_uart_port,buf,len,ticks_to_wait*10);
         // for special handle, fuck zhida
-        char *p = NULL;
-        uint8_t tmp[256] = {0};
-        uint8_t *net_data = NULL;
-        uint32_t net_len = 0;
-        int i = 0;
-        int remain_len = 0;
+        #define CMD_TMP_LEN     256
+        #define AT_CMD_SETWLAN  "AT+SETWLAN="
+        #define AT_CMD_SETNET   "AT+SETNET="
+        #define AT_CMD_ECHO     "AT+ECHO="
+        #define AT_CMD_RESET    "AT+RESET"
+        #define AT_CMD_NETSEND  "AT+NETSEND="
 
-        memcpy(tmp, buf, len);
-        ESP_LOGI("UART", "len: %d\r\n", len);
-        #define AT_CMD_SETWLAN "AT+SETWLAN="
-        #define AT_CMD_SETNET "AT+SETNET="
-        #define AT_CMD_ECHO "AT+ECHO="
-        #define AT_CMD_RESET "AT+RESET"
-        #define AT_CMD_NETSEND "AT+NETSEND="
+        int i = 0, remain_len = 0;
+        char *p = NULL;
+        uint8_t tmp[CMD_TMP_LEN] = {0};
+        uint8_t *net_data = NULL;
+        static uint8_t cmd_previous[128] = {0};
+        static uint8_t cmd_pre_len = 0;
+        uint32_t net_len = 0;
+
+        len = uart_read_bytes(esp_at_uart_port, buf, len, ticks_to_wait*10);
+
+        #if 1
+        if (strstr((const char*)buf, "\r\n")) {
+            if (cmd_pre_len > 0) {
+                ESP_LOGI("UART", "handle the previous cmd");
+                sprintf((char *)tmp, "%s", cmd_previous);
+                memcpy(tmp + cmd_pre_len, buf, len);
+                len += cmd_pre_len;
+                memset(cmd_previous, 0, 128);
+                cmd_pre_len = 0;
+            } else {
+                memcpy(tmp, buf, len);
+            }
+        } else {
+            ESP_LOGI("UART", "no rn, need combination");
+            memcpy(cmd_previous + cmd_pre_len, buf, len);
+            cmd_pre_len += len;
+        }
+        #endif
+
+        ESP_LOGI("UART", "rev len: %d, %s\r\n", len, buf);
         if (!strncmp(AT_CMD_SETWLAN, (const char*)tmp, strlen(AT_CMD_SETWLAN))) {
             p = strtok((char*)tmp + strlen(AT_CMD_SETWLAN), ",");
             ESP_LOGI("UART", "SSID:%s", p);
@@ -226,11 +247,12 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
                 }
 
                 for(i = 0; i < net_len; i++)
-                    ESP_LOGI("I Data:", "%02X", net_data[i]);
+                    ESP_LOGI("I Data", "%02X", net_data[i]);
                 tcp_send_data((char *)net_data, net_len);
                 ESP_LOGI("UART", "Sent to host ok");
+
                 memset(buf, 0, len);
-                //sprintf((char*)buf, AT_CMD_NETSEND"\r\n");
+                memset(tmp, 0, CMD_TMP_LEN);
                 free(net_data);
             } else {
                 memset(buf, 0, len);
@@ -255,14 +277,8 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
                     return -1;
                     break;
             }
-        #if 0
-        } else if (!strncmp(AT_CMD_RESET, (const char*)tmp, strlen(AT_CMD_RESET))) {
-            memset(buf, 0, len);
-            strcpy((char *)buf, "AT+RST\r\n");
-            len = strlen("AT+RST\r\n");
-        #endif
         } else {
-            //ESP_LOGI("UART", "Invaild paraments");
+            ESP_LOGW("UART", "standard cmd");
         }
         return len;
     }
