@@ -23,8 +23,11 @@
 #include "driver/uart.h"
 #include "esp_at_core.h"
 
+#define BUFFER_RX_MAX_LEN           256
+#define BUFFER_INDEX_MAX_LEN        32
+#define BUFFER_OUT_CMD_LEN          (BUFFER_RX_MAX_LEN + BUFFER_INDEX_MAX_LEN)
+
 static const char *TAG = "wifi";
-static const char *payload = "WLT_ESP32_Zhida_Z13\r\nSV:84.10.0\r\n";
 
 int socket_handle = 0;
 
@@ -34,20 +37,15 @@ int32_t esp_at_rhzl_write_data(uint8_t*data, int32_t len)
 
     ESP_LOGI(TAG, "O: %s", data);
     length = uart_write_bytes(UART_NUM_1,(char*)data, len);
+    if (length <= 0) {
+        ESP_LOGE(TAG, "Failed to write");
+    }
     return length;
 }
 
 static void tcp_heartbeat_task(void *pvParameters)
 {
     while(1) {
-        // send to host
-        #if 0
-        int err = send(socket_handle, payload, strlen(payload), 0);
-        if (err < 0) {
-            ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-            break;
-        }
-        #endif
 
         // send to mcu
         //esp_at_rhzl_write_data((uint8_t *)payload, strlen(payload));
@@ -57,17 +55,6 @@ static void tcp_heartbeat_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
-int tcp_send_data(char *data, int32_t len)
-{
-    // send to host, flag MSG_DONTWAIT
-    int err = send(socket_handle, data, len, 0);
-    if (err < 0) {
-        ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-        return -1;
-    }
-    return 0;
-}
-
 int tcp_close_socket(void)
 {
     shutdown(socket_handle, 0);
@@ -75,12 +62,23 @@ int tcp_close_socket(void)
     return 0;
 }
 
+int tcp_send_data(char *data, int32_t len)
+{
+    // send to host, flag MSG_DONTWAIT
+    int err = send(socket_handle, data, len, 0);
+    if (err < 0) {
+        ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+        tcp_close_socket();
+        return -1;
+    }
+    return 0;
+}
+
 static void tcp_client_task(void *pvParameters)
 {
-    #define OUT_CMD_BUFFER_LEN (256+32)
-    uint8_t rx_buffer[256] = {0};
-    uint8_t indx_buffer[32] = {0};
-    uint8_t out_buffer[OUT_CMD_BUFFER_LEN] = {0};
+    uint8_t rx_buffer[BUFFER_RX_MAX_LEN] = {0};
+    uint8_t indx_buffer[BUFFER_INDEX_MAX_LEN] = {0};
+    uint8_t out_buffer[BUFFER_OUT_CMD_LEN] = {0};
     static char host_ip[16] = {0};
     static int32_t port;
     int addr_family = 0;
@@ -135,7 +133,7 @@ static void tcp_client_task(void *pvParameters)
                 if (len == 0)
                     continue;
 
-                memset((void *)out_buffer, 0, OUT_CMD_BUFFER_LEN);
+                memset((void *)out_buffer, 0, BUFFER_OUT_CMD_LEN);
                 memset((void *)indx_buffer, 0, 32);
                 sprintf((char *)indx_buffer, "+IND=RNET,%d,", len);
                 memcpy((void *)out_buffer, indx_buffer, strlen((char *)indx_buffer));
