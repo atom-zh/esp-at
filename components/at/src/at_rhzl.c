@@ -52,12 +52,13 @@
 #define ZHIDA_VERSION              "WLT_ESP32_Zhida_Z13"
 #define EXAMPLE_ESP_WIFI_SSID      "Hoisting"
 #define EXAMPLE_ESP_WIFI_PASS      "jx999999"
-#define EXAMPLE_ESP_MAXIMUM_RETRY   10
+#define EXAMPLE_ESP_MAXIMUM_RETRY   5
 #define TEMP_BUFFER_SIZE            128
 #define ESP_AT_SCAN_LIST_SIZE       16
 
 static const char *TAG = "rhat";
-static const char *defautl_host = "192.168.3.177";
+//static const char *defautl_host = "192.168.3.177";
+static const char *defautl_host = "172.20.10.10";
 static const char *ATE0 = "ATE0\r\n";
 static int s_retry_num = 0;
 int32_t port = 5588;
@@ -67,6 +68,7 @@ net_para net;
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
+TaskHandle_t taskhandle = NULL;
 
 /* The event group allows multiple bits for each event, but we only care about two events:
  * - we are connected to the AP with an IP
@@ -88,7 +90,7 @@ static uint8_t at_set_default_netcfg(void)
     net.port = port;
     // creat socket
     ESP_LOGI(TAG, "Set default net: %s, port %d\n", net.ip, net.port);
-    socket_open(&net);
+    taskhandle = socket_open(&net);
     return ESP_AT_RESULT_CODE_OK;
 }
 
@@ -102,16 +104,19 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                 esp_wifi_connect();
                 break;
             case WIFI_EVENT_STA_CONNECTED:
+                s_retry_num = 0;
                 esp_at_rhzl_write_data((uint8_t *)"+IND=WICI\r\n", strlen("+IND=WICI\r\n"));
                 break;
             case WIFI_EVENT_STA_DISCONNECTED:
-                esp_at_rhzl_write_data((uint8_t *)"+IND=WIDI,200\r\n", strlen("+IND=WIDI,200\r\n"));
                 if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
                     esp_wifi_connect();
                     s_retry_num++;
                     ESP_LOGE(TAG, "retry to connect to the AP");
                 } else {
                     xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+                    esp_at_rhzl_write_data((uint8_t *)"+IND=WIDI,200\r\n", strlen("+IND=WIDI,200\r\n"));
+                    if (taskhandle)
+                        socket_close(&taskhandle);
                 }
                 ESP_LOGE(TAG,"connect to the AP fail");
                 break;
@@ -209,7 +214,7 @@ static uint8_t at_setup_wlan(uint8_t para_num)
     wifi_config.sta.pmf_cfg.required = false;
 
     //ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
     ESP_ERROR_CHECK(esp_wifi_start());
 
@@ -277,7 +282,9 @@ static uint8_t at_setup_setnet(uint8_t para_num)
     net.port = port;
     // creat socket
     ESP_LOGI(TAG, "Set net: %s, port %d\n", net.ip, net.port);
-    socket_open(&net);
+    if (taskhandle)
+        socket_close(&taskhandle);
+    taskhandle = socket_open(&net);
     return ESP_AT_RESULT_CODE_OK;
 }
 
@@ -332,7 +339,8 @@ static uint8_t at_setup_netsend(uint8_t para_num)
 
 static uint8_t at_exec_closesocket(uint8_t *cmd_name)
 {
-    tcp_close_socket();
+    if (taskhandle)
+        socket_close(&taskhandle);
     return ESP_AT_RESULT_CODE_OK;
 }
 

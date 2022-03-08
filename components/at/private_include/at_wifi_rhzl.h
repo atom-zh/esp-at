@@ -6,8 +6,8 @@ typedef struct {
     int32_t port;
 }net_para;
 
-int socket_open(net_para *net);
-int tcp_close_socket(void);
+TaskHandle_t socket_open(net_para *net);
+int socket_close(TaskHandle_t *taskhandle);
 void ap_record_sort_by_rssi(wifi_ap_record_t *ap_record_array, int len);
 
 #endif

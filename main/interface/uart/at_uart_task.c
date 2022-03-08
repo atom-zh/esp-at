@@ -246,10 +246,8 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
                     memcpy((void *)net_data + net_len - remain_len, (void *)buf, remain_len);
                 }
 
-                for(i = 0; i < net_len; i++)
-                    ESP_LOGI("I Data", "%02X", net_data[i]);
                 tcp_send_data((char *)net_data, net_len);
-                ESP_LOGI("UART", "Sent to host ok");
+                ESP_LOGI("UART", "Msg put successful");
 
                 memset(buf, 0, len);
                 memset(tmp, 0, CMD_TMP_LEN);
