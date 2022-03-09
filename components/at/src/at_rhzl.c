@@ -48,17 +48,21 @@
 
 #ifdef CONFIG_AT_RHZL_COMMAND_SUPPORT
 
-#define SOFTWARE_VERSION           "100.00.01"
+#define SOFTWARE_VERSION           "100.00.02"
 #define ZHIDA_VERSION              "WLT_ESP32_Zhida_Z13"
 #define EXAMPLE_ESP_WIFI_SSID      "Hoisting"
 #define EXAMPLE_ESP_WIFI_PASS      "jx999999"
+#define ESP_WIFI_AP_SSID           "espressif_rhdk"
+#define ESP_WIFI_AP_PASS           "dk666666"
+#define ESP_WIFI_AP_CHANNEL         6
+#define ESP_WIFI_MAX_STA_CONN       16
 #define EXAMPLE_ESP_MAXIMUM_RETRY   5
 #define TEMP_BUFFER_SIZE            128
 #define ESP_AT_SCAN_LIST_SIZE       16
 
 static const char *TAG = "rhat";
-//static const char *defautl_host = "192.168.3.177";
-static const char *defautl_host = "172.20.10.10";
+static const char *defautl_host = "192.168.3.177";
+//static const char *defautl_host = "172.20.10.10";
 static const char *ATE0 = "ATE0\r\n";
 static int s_retry_num = 0;
 int32_t port = 5588;
@@ -117,6 +121,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                     esp_at_rhzl_write_data((uint8_t *)"+IND=WIDI,200\r\n", strlen("+IND=WIDI,200\r\n"));
                     if (taskhandle)
                         socket_close(&taskhandle);
+                    //esp_wifi_stop();
                 }
                 ESP_LOGE(TAG,"connect to the AP fail");
                 break;
@@ -204,6 +209,9 @@ static uint8_t at_setup_wlan(uint8_t para_num)
         return ESP_AT_RESULT_CODE_ERROR;
     }
 
+   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+
+    // STA config
     strcpy((char*)wifi_config.sta.ssid, (char*)ssid);
     strcpy((char*)wifi_config.sta.password, (char*)passwd);
     /* Setting a password implies station will connect to all security modes including WEP/WPA.
@@ -212,12 +220,23 @@ static uint8_t at_setup_wlan(uint8_t para_num)
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
-    //ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
-    ESP_ERROR_CHECK(esp_wifi_start());
+    // AP config
+    strcpy((char*)wifi_config.ap.ssid, (char*)ESP_WIFI_AP_SSID);
+    wifi_config.ap.ssid_len = strlen(ESP_WIFI_AP_SSID);
+    strcpy((char*)wifi_config.ap.password, (char*)ESP_WIFI_AP_PASS);
+    wifi_config.ap.channel = ESP_WIFI_AP_CHANNEL;
+    wifi_config.ap.max_connection = ESP_WIFI_MAX_STA_CONN;
+    if (strlen(ESP_WIFI_AP_PASS) == 0) {
+        memset(wifi_config.ap.password, 0, sizeof(wifi_config.ap.password));
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    } else {
+        wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+    }
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
 
+    ESP_ERROR_CHECK(esp_wifi_start() );
     ESP_LOGI(TAG, "wifi_init_sta finished.");
 
     /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum

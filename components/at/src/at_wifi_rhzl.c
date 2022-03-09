@@ -56,6 +56,8 @@ struct wifi_info wifi = {0};
 static char host_ip[16] = {0};
 static int32_t port;
 
+SemaphoreHandle_t xSemaphore = NULL;
+
 int32_t esp_at_rhzl_write_data(uint8_t*data, int32_t len)
 {
     uint32_t length = 0;
@@ -79,7 +81,7 @@ static void tcp_send_task(void *pvParameters)
     while(1) {
         if (wifi.status != CONNECTED) {
             vTaskDelay(100 / portTICK_PERIOD_MS);
-            ESP_LOGI(TAG, "send task, not connected status");
+            //ESP_LOGI(TAG, "send task, not connected status");
             continue;
         }
 
@@ -128,6 +130,7 @@ int tcp_send_data(char *data, int32_t len)
     struct buf_el *el = NULL;
     char *p = data;
 
+    //xSemaphoreTake(xSemaphore, portMAX_DELAY);
     ESP_LOGI(TAG, "APPEND data");
     for(i = 0; i < len; i++)
         sprintf(prt_buf+i*3, " %02X", *(p+i));
@@ -138,6 +141,7 @@ int tcp_send_data(char *data, int32_t len)
     el->buf = malloc(len);
     memcpy(el->buf, data, el->len);
     DL_APPEND(h_list, el);
+    //xSemaphoreGive(xSemaphore);
 
     return 0;
 }
@@ -164,28 +168,31 @@ static int tcp_socket_creat(char host_ip[], uint32_t port)
     dest_addr.sin_port = htons(port);
     addr_family = AF_INET;
     ip_protocol = IPPROTO_IP;
-
+    xSemaphore = xSemaphoreCreateBinary();
+    
     do {
         wifi.handle =  socket(addr_family, SOCK_STREAM, ip_protocol);
         if (wifi.handle < 0) {
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
         }
-
         //setsockopt(wifi.handle, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt));
 
         ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, port);
+        //xSemaphoreTake(xSemaphore, portMAX_DELAY);
         err = connect(wifi.handle, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_in6));
+        //xSemaphoreGive(xSemaphore);
         if (err < 0) {
             ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
             break;
         }
 
         ESP_LOGI(TAG, "Successfully connected");
+        wifi.status = CONNECTED;
         sprintf((char *)out_buffer, "+IND=TCPC,%s,%d\r\n", host_ip, port);
         esp_at_rhzl_write_data(out_buffer, strlen((char *)out_buffer));
     } while(0);
-
+    
     return err;
 }
 
@@ -260,9 +267,9 @@ static void tcp_client_task(void *pvParameters)
                 tcp_close_socket();
                 if (tcp_socket_creat(host_ip, port) < 0) {
                     ESP_LOGE(TAG, "creat socket failed %d, retry", ret);
-                    esp_at_rhzl_write_data((uint8_t *)"+IND=TCPD\r\n", strlen("+IND=TCPD\r\n"));
-                } else {
-                    wifi.status = CONNECTED;
+                    //esp_at_rhzl_write_data((uint8_t *)"+IND=TCPD\r\n", strlen("+IND=TCPD\r\n"));
+                //} else {
+                    //wifi.status = CONNECTED;
                 }
                 break;
             case CONNECTED:
@@ -279,7 +286,7 @@ static void tcp_client_task(void *pvParameters)
             close(wifi.handle);
             wifi.status = UNKNOW;
         }
-        vTaskDelay(200 / portTICK_PERIOD_MS);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
     }
     vTaskDelete(NULL);
 }
@@ -321,6 +328,8 @@ TaskHandle_t socket_open(net_para *net)
 int socket_close(TaskHandle_t *taskhandle)
 {
     if (taskhandle) {
+        //vTaskDelete(taskhandle_recv);
+        //vTaskDelete(taskhandle_send);
         vTaskDelete(taskhandle);
     }
     return 0;
