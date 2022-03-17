@@ -125,7 +125,7 @@ static int32_t at_port_write_data(uint8_t*data,int32_t len)
 {
     uint32_t length = 0;
 
-    ESP_LOGI("UART", "O: %s", data);
+    ESP_LOGI("UART", "echo: %s", data);
     #if 0
     #define STR_WIFI_STATE "WIFI "
     #define STR_OK "OK"
@@ -180,7 +180,7 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
         #define AT_CMD_RESET    "AT+RESET"
         #define AT_CMD_NETSEND  "AT+NETSEND="
 
-        int i = 0, remain_len = 0;
+        int remain_len = 0;
         char *p = NULL;
         uint8_t tmp[CMD_TMP_LEN] = {0};
         uint8_t *net_data = NULL;
@@ -190,7 +190,7 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
 
         len = uart_read_bytes(esp_at_uart_port, buf, len, ticks_to_wait*10);
 
-        #if 1
+        #if 0
         if (strstr((const char*)buf, "\r\n")) {
             if (cmd_pre_len > 0) {
                 ESP_LOGI("UART", "handle the previous cmd");
@@ -207,6 +207,8 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
             memcpy(cmd_previous + cmd_pre_len, buf, len);
             cmd_pre_len += len;
         }
+        #else
+            memcpy(tmp, buf, len);
         #endif
 
         ESP_LOGI("UART", "rev len: %d, %s\r\n", len, buf);
@@ -258,7 +260,7 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
             }
 
             len = strlen((char *)buf);
-            ESP_LOGI("UART", "CMD:%s, len:%d", buf, len);
+            ESP_LOGI("UART", "CMD(%d):%s", len, buf);
         } else if (!strncmp(AT_CMD_ECHO, (const char*)tmp, strlen(AT_CMD_ECHO))) {
             p = strtok((char*)tmp + strlen(AT_CMD_ECHO), "=");
             memset(buf, 0, len);
@@ -276,7 +278,7 @@ static int32_t at_port_read_data(uint8_t*buf,int32_t len)
                     break;
             }
         } else {
-            ESP_LOGW("UART", "standard cmd");
+            ESP_LOGW("UART", "this is standard cmd");
         }
         return len;
     }
@@ -684,7 +686,7 @@ static uint8_t at_setupCmdUartDef(uint8_t para_num)
     at_default_flag = true;
     ret = at_setupCmdUart(para_num);
     at_default_flag = false;
-    
+
     return ret;
 }
 

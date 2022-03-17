@@ -67,7 +67,6 @@ static const char *ATE0 = "ATE0\r\n";
 static int s_retry_num = 0;
 int32_t port = 5588;
 uint8_t *ip_addr = NULL;
-uint8_t *ssid = (uint8_t *)EXAMPLE_ESP_WIFI_SSID, *passwd = (uint8_t *)EXAMPLE_ESP_WIFI_PASS;
 net_para net;
 
 /* FreeRTOS event group to signal when we are connected*/
@@ -170,46 +169,11 @@ static uint8_t at_event_register_call(void)
     return 0;
 }
 
-uint8_t esp_at_rhzl_init(void)
+static int esp_rhzl_wifi_start(uint8_t *ssid, uint8_t *passwd)
 {
-    esp_at_port_read_data((uint8_t *)ATE0, strlen(ATE0));
-    esp_at_rhzl_write_data((uint8_t *)ZHIDA_VERSION"\r\n", strlen(ZHIDA_VERSION"\r\n"));
-    esp_at_rhzl_write_data((uint8_t *)"SV:"SOFTWARE_VERSION"\r\n", strlen("SV:"SOFTWARE_VERSION"\r\n"));
-    at_event_register_call();
-    show_version();
-    return 0;
-}
-
-static uint8_t at_query_wlan(uint8_t *cmd_name)
-{
-    ESP_LOGE(TAG, "at_query_cmd_wlan");
-
-    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
-    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "%s: RHZL test\r\n", cmd_name);
-    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
-    return ESP_AT_RESULT_CODE_OK;
-}
-
-static uint8_t at_setup_wlan(uint8_t para_num)
-{
-    int32_t cnt = 0;
     wifi_config_t wifi_config = {0};
 
-    ESP_LOGI(TAG, "at_setup_wlan");
-
-    esp_wifi_stop();
-    //at_event_register_call();
-    if (esp_at_get_para_as_str(cnt++, &ssid) != ESP_AT_PARA_PARSE_RESULT_OK) {
-        ESP_LOGE(TAG, "Failed to get ssid: %s", ssid);
-        return ESP_AT_RESULT_CODE_ERROR;
-    }
-
-    if (esp_at_get_para_as_str(cnt++, &passwd) != ESP_AT_PARA_PARSE_RESULT_OK) {
-        ESP_LOGE(TAG, "Failed to get password: %s", passwd);
-        return ESP_AT_RESULT_CODE_ERROR;
-    }
-
-   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
 
     // STA config
     strcpy((char*)wifi_config.sta.ssid, (char*)ssid);
@@ -258,17 +222,61 @@ static uint8_t at_setup_wlan(uint8_t para_num)
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
+    return 0;
+}
 
+uint8_t esp_at_rhzl_init(void)
+{
+    esp_at_port_read_data((uint8_t *)ATE0, strlen(ATE0));
+    esp_at_rhzl_write_data((uint8_t *)ZHIDA_VERSION"\r\n", strlen(ZHIDA_VERSION"\r\n"));
+    esp_at_rhzl_write_data((uint8_t *)"SV:"SOFTWARE_VERSION"\r\n", strlen("SV:"SOFTWARE_VERSION"\r\n"));
+    at_event_register_call();
+    show_version();
+    esp_rhzl_wifi_start((uint8_t *)EXAMPLE_ESP_WIFI_SSID, (uint8_t *)EXAMPLE_ESP_WIFI_PASS);
+    return 0;
+}
+
+static uint8_t at_query_wlan(uint8_t *cmd_name)
+{
+    ESP_LOGE(TAG, "at_query_cmd_wlan");
+
+    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "%s: RHZL test\r\n", cmd_name);
+    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
+    return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setup_wlan(uint8_t para_num)
+{
+    int32_t cnt = 0;
+    uint8_t *ssid = NULL;
+    uint8_t *passwd = NULL;
+
+    ESP_LOGI(TAG, "at_setup_wlan");
+
+    esp_wifi_stop();
+    //at_event_register_call();
+    if (esp_at_get_para_as_str(cnt++, &ssid) != ESP_AT_PARA_PARSE_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to get ssid: %s", ssid);
+        return ESP_AT_RESULT_CODE_ERROR;
+    }
+
+    if (esp_at_get_para_as_str(cnt++, &passwd) != ESP_AT_PARA_PARSE_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to get password: %s", passwd);
+        return ESP_AT_RESULT_CODE_ERROR;
+    }
+
+    esp_rhzl_wifi_start(ssid, passwd);
     return ESP_AT_RESULT_CODE_OK;
 }
 
 static uint8_t at_exec_getwlan(uint8_t *cmd_name)
 {
     ESP_LOGI(TAG, "getwlan SSID:%s password:%s",
-                 ssid, passwd);
+                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
 
     uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
-    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=%s,%s\r\n", ssid, passwd);
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=%s,%s\r\n", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
     esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
     return ESP_AT_RESULT_CODE_OK;
 }
