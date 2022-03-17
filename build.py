@@ -184,6 +184,49 @@ def build_project(platform_name, module_name, silence, build_args):
             data = rd_f.read().splitlines()
             wr_f.write(' '.join(data))
 
+    # combine multi bin
+    # esptool.py --chip esp32 merge_bin --output target.bin --format raw --flash_freq 40m --flash_mode dio --flash_size 4MB
+    #   --spi-connection SPI --target-offset 0x0
+    #   0x8000 partition_table/partition-table.bin 0x10000 ota_data_initial.bin 0xf000 phy_init_data.bin
+    #   0x1000 bootloader/bootloader.bin 0x100000 esp-at.bin 0x20000 at_customize.bin
+    #   0x21000 customized_partitions/ble_data.bin 0x24000 customized_partitions/server_cert.bin
+    #   0x26000 customized_partitions/server_key.bin 0x28000 customized_partitions/server_ca.bin
+    #   0x2a000 customized_partitions/client_cert.bin 0x2c000 customized_partitions/client_key.bin
+    #   0x2e000 customized_partitions/client_ca.bin 0x30000 customized_partitions/factory_param.bin
+    with open(os.path.join('build', "flasher_args.json")) as f:
+        target_file = "target.bin"
+        def _safe_relpath(path, start=None):
+            """ Return a relative path, same as os.path.relpath, but only if this is possible.
+
+            It is not possible on Windows, if the start directory and the path are on different drives.
+            """
+            try:
+                return os.path.relpath(path, os.curdir if start is None else start)
+            except ValueError:
+                return os.path.abspath(path)
+
+        def flasher_path(f):
+            return _safe_relpath(os.path.join("build", f))
+
+        flasher_args = json.load(f)
+        # flash_bin = " ".join(flasher_args["write_flash_args"]) + " "
+        flash_bin = "--flash_freq 40m --flash_mode dio --flash_size 4MB "
+        flash_items = sorted(
+            ((o, f) for (o, f) in flasher_args["flash_files"].items() if len(o) > 0),
+            key=lambda x: int(x[0], 0),
+        )
+        for o, f in flash_items:
+            flash_bin += o + " " + flasher_path(f) + " "
+
+        cmd = 'esptool.py --chip {0} merge_bin --output {1} --format raw --spi-connection SPI --target-offset 0x0 {2}\
+            '.format(idf_target, flasher_path(target_file), flash_bin.strip())
+        ret = subprocess.call(cmd, shell = True)
+        print('esptool.py combine bin ret: {}'.format(ret))
+        print(cmd)
+        if ret:
+            raise Exception("esptool.py combine bin failed")
+        print('Combine multi bin Successful')
+
 def get_param_data_info(source_file, sheet_name):
     filename, filetype = os.path.splitext(source_file)
     if filetype == '.xlsx':
