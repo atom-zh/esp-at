@@ -412,6 +412,16 @@ static uint8_t at_exec_wifiscan(uint8_t *cmd_name)
     return ESP_AT_RESULT_CODE_OK;
 }
 
+static uint8_t at_query_version(uint8_t *cmd_name)
+{
+    ESP_LOGI(TAG, "at_query_version");
+
+    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "SV:"SOFTWARE_VERSION"\r\n");
+    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
+    return ESP_AT_RESULT_CODE_OK;
+}
+
 static uint8_t at_exec_reset(uint8_t *cmd_name)
 {
     ESP_LOGI(TAG, "Reboot ...");
@@ -429,6 +439,7 @@ static const esp_at_cmd_struct s_at_rhzl_cmd[] = {
     {"+NETSEND",            NULL, NULL, at_setup_netsend, NULL},            // send socket data
     {"+CLOSESOCKET",        NULL, NULL, NULL, at_exec_closesocket},         // close socket connect
     {"+WIFISTARTSCANNING",  NULL, NULL, NULL, at_exec_wifiscan},            // scan ap list
+    {"+GETVERSION",         NULL, at_query_version, NULL, NULL},            // get rhzd software version
     {"+RESET",              NULL, NULL, NULL, at_exec_reset},               // reset
 };
 
