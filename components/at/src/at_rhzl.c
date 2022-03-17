@@ -72,6 +72,8 @@ net_para net;
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 TaskHandle_t taskhandle = NULL;
+esp_event_handler_instance_t instance_any_id;
+esp_event_handler_instance_t instance_got_ip;
 
 /* The event group allows multiple bits for each event, but we only care about two events:
  * - we are connected to the AP with an IP
@@ -148,9 +150,6 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         }
     }
 }
-
-esp_event_handler_instance_t instance_any_id;
-esp_event_handler_instance_t instance_got_ip;
 
 static uint8_t at_event_register_call(void)
 {

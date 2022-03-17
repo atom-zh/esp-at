@@ -101,22 +101,20 @@ static void tcp_send_task(void *pvParameters)
                 } else {
                     // wait server recv ack
                     ESP_LOGI(TAG, "msg has been sent, wait for server ack");
-                    if (xSemaphoreTake(xSemaphore, 1000 / portTICK_PERIOD_MS) == pdTRUE) {
+                    if (xSemaphoreTake(xSemaphore, 2000 / portTICK_PERIOD_MS) == pdTRUE) {
                         wifi.retry_num = 0;
-                        vTaskDelay(100 / portTICK_PERIOD_MS);
-                        break;   
+                        break;
                     } else {
                         wifi.retry_num++;
-                        break;
                     }
-    
                 }
+                vTaskDelay(200 / portTICK_PERIOD_MS);
             } while(wifi.retry_num < 4);
 
             if (wifi.retry_num > 0) {
                 wifi.status = WIFI_DISCONNECT;
-                ESP_LOGE(TAG, "too more retry %d", wifi.retry_num);
-                break;
+                ESP_LOGE(TAG, "too more retry %d, skip this data", wifi.retry_num);
+                wifi.retry_num = 0;
             }
 
             if (el->buf) {
