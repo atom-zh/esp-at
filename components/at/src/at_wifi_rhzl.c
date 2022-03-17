@@ -23,6 +23,7 @@
 #include "driver/uart.h"
 #include "esp_at_core.h"
 #include "utlist.h"
+#include "nvs.h"
 
 #define BUFFER_RX_MAX_LEN           256
 #define BUFFER_INDEX_MAX_LEN        32
@@ -54,8 +55,6 @@ struct buf_el {
 
 struct buf_el *h_list = NULL;
 struct wifi_info wifi = {0};
-static char host_ip[16] = {0};
-static int32_t port;
 
 SemaphoreHandle_t xSemaphore = NULL;
 
@@ -158,7 +157,7 @@ int tcp_close_socket(void)
     return 0;
 }
 
-static int tcp_socket_creat(char host_ip[], uint32_t port)
+static int tcp_socket_creat(char *host_ip, uint32_t port)
 {
     int err = -1;
     int addr_family = 0;
@@ -194,6 +193,7 @@ static int tcp_socket_creat(char host_ip[], uint32_t port)
 
 static void tcp_recv_task(void *pvParameters)
 {
+    struct store_para *net_para = pvParameters;
     uint8_t rx_buffer[BUFFER_RX_MAX_LEN] = {0};
     uint8_t indx_buffer[BUFFER_INDEX_MAX_LEN] = {0};
     uint8_t out_buffer[BUFFER_OUT_CMD_LEN] = {0};
@@ -217,7 +217,7 @@ static void tcp_recv_task(void *pvParameters)
             // Data received
             xSemaphoreGive(xSemaphore);
             rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
-            ESP_LOGI(TAG, "Received %d bytes from %s:", len, host_ip);
+            ESP_LOGI(TAG, "Received %d bytes from %s:", len, net_para->ip);
             ESP_LOGI(TAG, "%s", rx_buffer);
             if (len == 0)
                 continue;
@@ -246,28 +246,26 @@ TaskHandle_t taskhandle_recv;
 static void tcp_client_task(void *pvParameters)
 {
     int ret = -1;
-    net_para *net = pvParameters;
+    struct store_para net_para = {0};
     uint8_t out_buffer[BUFFER_OUT_CMD_LEN] = {0};
     xSemaphore = xSemaphoreCreateBinary();
 
-    strcpy(host_ip, (void *)net->ip);
-    port = net->port;
-
-    ESP_LOGI(TAG, "task net: %s, port %d\n", net->ip, net->port);
+    nvs_read_data_from_flash(&net_para);
+    ESP_LOGI(TAG, "task net: %s, port %d\n", net_para.ip, net_para.port);
     if (!taskhandle_send)
-        xTaskCreate(tcp_send_task, "tcp_send", 2048, NULL, 8, &taskhandle_send);
+        xTaskCreate(tcp_send_task, "tcp_send", 2048, &net_para, 8, &taskhandle_send);
     if (!taskhandle_recv)
-        xTaskCreate(tcp_recv_task, "tcp_recv", 2048, NULL, 7, &taskhandle_recv);
+        xTaskCreate(tcp_recv_task, "tcp_recv", 2048, &net_para, 7, &taskhandle_recv);
 
     while (1) {
         switch(wifi.status) {
             case WIFI_UNKNOW:
             case WIFI_READY:
-                if (tcp_socket_creat(host_ip, port) < 0) {
+                if (tcp_socket_creat((char *)&net_para.ip, net_para.port) < 0) {
                     ESP_LOGE(TAG, "creat socket failed %d, retry", ret);
                 } else {
                     wifi.status = WIFI_CONNECTED;
-                    sprintf((char *)out_buffer, "+IND=TCPC,%s,%d\r\n", host_ip, port);
+                    sprintf((char *)out_buffer, "+IND=TCPC,%s,%d\r\n", net_para.ip, net_para.port);
                     esp_at_rhzl_write_data(out_buffer, strlen((char *)out_buffer));
                 }
                 break;
@@ -316,7 +314,7 @@ void ap_record_sort_by_rssi(wifi_ap_record_t *ap_record_array, int len)
     }
 }
 
-TaskHandle_t socket_open(net_para *net)
+TaskHandle_t socket_open(struct store_para *para)
 {
     TaskHandle_t taskhandle;
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
@@ -324,7 +322,7 @@ TaskHandle_t socket_open(net_para *net)
      * examples/protocols/README.md for more information about this function.
      */
     //ESP_ERROR_CHECK(example_connect());
-    xTaskCreate(tcp_client_task, "tcp_client", 4096, net, 5, &taskhandle);
+    xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, &taskhandle);
 
     return 0;
 }

@@ -45,6 +45,7 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "freertos/event_groups.h"
+#include "nvs.h"
 
 #ifdef CONFIG_AT_RHZL_COMMAND_SUPPORT
 
@@ -61,13 +62,8 @@
 #define ESP_AT_SCAN_LIST_SIZE       16
 
 static const char *TAG = "rhat";
-static const char *defautl_host = "192.168.3.177";
-//static const char *defautl_host = "172.20.10.10";
 static const char *ATE0 = "ATE0\r\n";
 static int s_retry_num = 0;
-int32_t port = 5588;
-uint8_t *ip_addr = NULL;
-net_para net;
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
@@ -88,14 +84,58 @@ void show_version(void)
     ESP_LOGI("", "*****************************");
 }
 
+int nvs_write_data_to_flash(struct store_para *para)
+{
+    nvs_handle handle;
+    static const char *NVS_CUSTOMER = "rhzd data";
+    static const char *DATA1 = "net para";
+
+    ESP_LOGI("NV", "write ssid:%s passwd:%s\r\n", para->ssid, para->password);
+    ESP_LOGI("NV", "write ip:%s port:%d\r\n", para->ip, para->port);
+
+    ESP_ERROR_CHECK(nvs_open(NVS_CUSTOMER, NVS_READWRITE, &handle));
+    ESP_ERROR_CHECK(nvs_set_blob(handle, DATA1, para, sizeof(struct store_para)));
+    ESP_ERROR_CHECK(nvs_commit(handle));
+    nvs_close(handle);
+
+    return 0;
+}
+
+int nvs_read_data_from_flash(struct store_para *para)
+{
+    nvs_handle handle;
+    uint32_t len = 0;
+    static const char *NVS_CUSTOMER = "rhzd data";
+    static const char *DATA1 = "net para";
+
+    len = sizeof(struct store_para);
+    memset(para, 0x0, len);
+
+    ESP_ERROR_CHECK(nvs_open(NVS_CUSTOMER, NVS_READWRITE, &handle));
+    if (nvs_get_blob(handle, DATA1, para, &len) == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI("NV", "param not found\n");
+        return 0;
+    }
+
+    ESP_LOGI("NV", "read ssid:%s passwd:%s\r\n", para->ssid, para->password);
+    ESP_LOGI("NV", "read ip:%s port:%d\r\n", para->ip, para->port);
+    nvs_close(handle);
+    return 0;
+}
+
 static uint8_t at_set_default_netcfg(void)
 {
-    // use default config
-    strcpy((char *)&net.ip, (const char *)defautl_host);
-    net.port = port;
-    // creat socket
-    ESP_LOGI(TAG, "Set default net: %s, port %d\n", net.ip, net.port);
-    taskhandle = socket_open(&net);
+    struct store_para net_para = {0};
+
+    nvs_read_data_from_flash(&net_para);
+    if (net_para.ip && net_para.port) {
+        // creat socket
+        ESP_LOGI(TAG, "Set default net: %s, port %d\n", net_para.ip, net_para.port);
+        taskhandle = socket_open(&net_para);
+    } else {
+        ESP_LOGW(TAG, "No net para\n");
+    }
+
     return ESP_AT_RESULT_CODE_OK;
 }
 
@@ -226,12 +266,21 @@ static int esp_rhzl_wifi_start(uint8_t *ssid, uint8_t *passwd)
 
 uint8_t esp_at_rhzl_init(void)
 {
+    struct store_para net_para = {0};
+
     esp_at_port_read_data((uint8_t *)ATE0, strlen(ATE0));
     esp_at_rhzl_write_data((uint8_t *)ZHIDA_VERSION"\r\n", strlen(ZHIDA_VERSION"\r\n"));
     esp_at_rhzl_write_data((uint8_t *)"SV:"SOFTWARE_VERSION"\r\n", strlen("SV:"SOFTWARE_VERSION"\r\n"));
     at_event_register_call();
     show_version();
-    esp_rhzl_wifi_start((uint8_t *)EXAMPLE_ESP_WIFI_SSID, (uint8_t *)EXAMPLE_ESP_WIFI_PASS);
+
+    nvs_read_data_from_flash(&net_para);
+    if (net_para.ssid && net_para.password) {
+        esp_rhzl_wifi_start((uint8_t *)net_para.ssid, (uint8_t *)net_para.password);
+    } else {
+        ESP_LOGW(TAG, "No net para of wifi\n");
+    }
+
     return 0;
 }
 
@@ -250,6 +299,7 @@ static uint8_t at_setup_wlan(uint8_t para_num)
     int32_t cnt = 0;
     uint8_t *ssid = NULL;
     uint8_t *passwd = NULL;
+    struct store_para net_para = {0};
 
     ESP_LOGI(TAG, "at_setup_wlan");
 
@@ -265,17 +315,28 @@ static uint8_t at_setup_wlan(uint8_t para_num)
         return ESP_AT_RESULT_CODE_ERROR;
     }
 
+    nvs_read_data_from_flash(&net_para);
+    if (memcmp(&net_para.ssid, ssid, strlen((const char *)ssid)) || \
+            memcmp(&net_para.password, passwd, strlen((const char *)passwd))) {
+        memcpy(&net_para.ssid, ssid, strlen((const char *)ssid) +1 );
+        memcpy(&net_para.password, passwd, strlen((const char *)passwd) + 1);
+        nvs_write_data_to_flash(&net_para);
+    }
+
     esp_rhzl_wifi_start(ssid, passwd);
     return ESP_AT_RESULT_CODE_OK;
 }
 
 static uint8_t at_exec_getwlan(uint8_t *cmd_name)
 {
-    ESP_LOGI(TAG, "getwlan SSID:%s password:%s",
-                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
-
     uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
-    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=%s,%s\r\n", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+    struct store_para net_para = {0};
+
+    nvs_read_data_from_flash(&net_para);
+    ESP_LOGI(TAG, "getwlan SSID:%s password:%s",
+                 net_para.ssid, net_para.password);
+
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=%s,%s\r\n", net_para.ssid, net_para.password);
     esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
     return ESP_AT_RESULT_CODE_OK;
 }
@@ -293,6 +354,9 @@ static uint8_t at_exec_stopwlan(uint8_t *cmd_name)
 static uint8_t at_setup_setnet(uint8_t para_num)
 {
     int cnt = 2;  //ignore the first of 2
+    int32_t port = 0;
+    uint8_t *ip_addr = NULL;
+    struct store_para net_para = {0};
 
     if (esp_at_get_para_as_str(cnt++, &ip_addr) != ESP_AT_PARA_PARSE_RESULT_OK) {
         ESP_LOGE(TAG, "Failed to get ip_addr: %s", ip_addr);
@@ -304,22 +368,29 @@ static uint8_t at_setup_setnet(uint8_t para_num)
         return ESP_AT_RESULT_CODE_ERROR;
     }
 
-    strcpy((char *)&net.ip, (const char *)ip_addr);
-    net.port = port;
+    nvs_read_data_from_flash(&net_para);
+    if (memcmp(&net_para.ip, ip_addr, strlen((const char *)ip_addr)) || net_para.port != port) {
+        memcpy(&net_para.ip, (const char *)ip_addr, strlen((const char *)ip_addr));
+        net_para.port = port;
+        nvs_write_data_to_flash(&net_para);
+    }
+
     // creat socket
-    ESP_LOGI(TAG, "Set net: %s, port %d\n", net.ip, net.port);
+    ESP_LOGI(TAG, "Set net: %s, port %d\n", net_para.ip, net_para.port);
     if (taskhandle)
         socket_close(&taskhandle);
-    taskhandle = socket_open(&net);
+    taskhandle = socket_open(&net_para);
     return ESP_AT_RESULT_CODE_OK;
 }
 
 static uint8_t at_exec_getnet(uint8_t *cmd_name)
 {
     uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
+    struct store_para net_para = {0};
 
-    ESP_LOGI(TAG, "Get net: 192.168.3.177, port %d\n", port);
-    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=0,0,192.168.3.177,%d\r\n", port);
+    nvs_read_data_from_flash(&net_para);
+    ESP_LOGI(TAG, "Get net: %s, port %d\n", net_para.ip, net_para.port);
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "OK=0,0,%s,%d\r\n", net_para.ip, net_para.port);
     esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
     return ESP_AT_RESULT_CODE_OK;
 }
