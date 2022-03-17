@@ -7,7 +7,7 @@ esp-idf
 include/config
 include/sdkconfig.h
 build/
-#sdkconfig.old
+sdkconfig.old
 #sdkconfig
 .DS_Store
 
