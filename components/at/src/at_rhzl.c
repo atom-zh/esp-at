@@ -49,7 +49,7 @@
 
 #ifdef CONFIG_AT_RHZL_COMMAND_SUPPORT
 
-#define SOFTWARE_VERSION           "100.00.02"
+#define SOFTWARE_VERSION           "100.00.03"
 #define ZHIDA_VERSION              "WLT_ESP32_Zhida_Z13"
 #define EXAMPLE_ESP_WIFI_SSID      "Hoisting"
 #define EXAMPLE_ESP_WIFI_PASS      "jx999999"
