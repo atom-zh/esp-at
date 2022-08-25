@@ -561,6 +561,7 @@ const uint8_t* esp_at_get_current_cmd_name(void);
 esp_err_t esp_at_wifi_event_handler(void *ctx, system_event_t *event);
 
 uint8_t esp_at_rhzl_init(void);
+bool wlmode_is_std(void);
 int tcp_send_data(char *data, int32_t len);
 int32_t esp_at_rhzl_write_data(uint8_t*data, int32_t len);
 #endif

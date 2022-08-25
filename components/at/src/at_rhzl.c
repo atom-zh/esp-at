@@ -49,7 +49,7 @@
 
 #ifdef CONFIG_AT_RHZL_COMMAND_SUPPORT
 
-#define SOFTWARE_VERSION           "100.00.03"
+#define SOFTWARE_VERSION           "100.00.04"
 #define ZHIDA_VERSION              "WLT_ESP32_Zhida_Z13"
 #define EXAMPLE_ESP_WIFI_SSID      "Hoisting"
 #define EXAMPLE_ESP_WIFI_PASS      "jx999999"
@@ -64,9 +64,10 @@
 static const char *TAG = "rhat";
 static const char *ATE0 = "ATE0\r\n";
 static int s_retry_num = 0;
+int g_wlmode = 0;
 
 /* FreeRTOS event group to signal when we are connected*/
-static EventGroupHandle_t s_wifi_event_group;
+static EventGroupHandle_t s_wifi_event_group = NULL;
 TaskHandle_t taskhandle = NULL;
 esp_event_handler_instance_t instance_any_id;
 esp_event_handler_instance_t instance_got_ip;
@@ -84,12 +85,21 @@ void show_version(void)
     ESP_LOGI("", "*****************************");
 }
 
+bool wlmode_is_std(void)
+{
+    if (g_wlmode == WLMODE_STD)
+        return true;
+    else
+        return false;
+}
+
 int nvs_write_data_to_flash(struct store_para *para)
 {
     nvs_handle handle;
     static const char *NVS_CUSTOMER = "rhzd data";
     static const char *DATA1 = "net para";
 
+    ESP_LOGI("NV", "write wifi mode:%d\r\n", para->mode);
     ESP_LOGI("NV", "write ssid:%s passwd:%s\r\n", para->ssid, para->password);
     ESP_LOGI("NV", "write ip:%s port:%d\r\n", para->ip, para->port);
 
@@ -117,8 +127,10 @@ int nvs_read_data_from_flash(struct store_para *para)
         return 0;
     }
 
+    ESP_LOGI("NV", "read wifi mode:%d\r\n", para->mode);
     ESP_LOGI("NV", "read ssid:%s passwd:%s\r\n", para->ssid, para->password);
     ESP_LOGI("NV", "read ip:%s port:%d\r\n", para->ip, para->port);
+
     nvs_close(handle);
     return 0;
 }
@@ -193,6 +205,11 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 
 static uint8_t at_event_register_call(void)
 {
+    if (s_wifi_event_group) {
+        ESP_LOGW(TAG,"at event call already registered");
+        return 0;
+    }
+
     s_wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
@@ -271,11 +288,15 @@ uint8_t esp_at_rhzl_init(void)
     esp_at_port_read_data((uint8_t *)ATE0, strlen(ATE0));
     esp_at_rhzl_write_data((uint8_t *)ZHIDA_VERSION"\r\n", strlen(ZHIDA_VERSION"\r\n"));
     esp_at_rhzl_write_data((uint8_t *)"SV:"SOFTWARE_VERSION"\r\n", strlen("SV:"SOFTWARE_VERSION"\r\n"));
-    at_event_register_call();
     show_version();
 
     nvs_read_data_from_flash(&net_para);
-    if (net_para.ssid && net_para.password) {
+    g_wlmode = net_para.mode;
+    if (net_para.mode == WLMODE_STD) {
+        ESP_LOGI(TAG, "STD WIFI mode\n");
+    } else if (net_para.ssid && net_para.password) {
+        ESP_LOGI(TAG, "RHZD WIFI mode\n");
+        at_event_register_call();
         esp_rhzl_wifi_start((uint8_t *)net_para.ssid, (uint8_t *)net_para.password);
     } else {
         ESP_LOGW(TAG, "No net para of wifi\n");
@@ -317,12 +338,16 @@ static uint8_t at_setup_wlan(uint8_t para_num)
 
     nvs_read_data_from_flash(&net_para);
     if (memcmp(&net_para.ssid, ssid, strlen((const char *)ssid)) || \
-            memcmp(&net_para.password, passwd, strlen((const char *)passwd))) {
+            memcmp(&net_para.password, passwd, strlen((const char *)passwd)) || \
+            net_para.mode != WLMODE_RHZD) {
+        // If you use a custom command to set WIFI, it is considered to be in RHZD mode
+        net_para.mode = WLMODE_RHZD;
         memcpy(&net_para.ssid, ssid, strlen((const char *)ssid) +1 );
         memcpy(&net_para.password, passwd, strlen((const char *)passwd) + 1);
         nvs_write_data_to_flash(&net_para);
     }
 
+    at_event_register_call();
     esp_rhzl_wifi_start(ssid, passwd);
     return ESP_AT_RESULT_CODE_OK;
 }
@@ -500,6 +525,54 @@ static uint8_t at_query_version(uint8_t *cmd_name)
     return ESP_AT_RESULT_CODE_OK;
 }
 
+static uint8_t at_query_wlmode(uint8_t *cmd_name)
+{
+    ESP_LOGE(TAG, "at_query_wlan_mode");
+
+    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "%s: 0:STD 1:RHZD\r\n", cmd_name);
+    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
+    return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setup_wlmode(uint8_t para_num)
+{
+    int32_t mode = 0;
+    int32_t cnt = 0;
+    struct store_para net_para = {0};
+
+    if (esp_at_get_para_as_digit(cnt++, &mode) != ESP_AT_PARA_PARSE_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to get wlmode: %d\r\n", mode);
+        return ESP_AT_RESULT_CODE_ERROR;
+    }
+
+    if (mode > WLMODE_MAX || mode < WLMODE_STD) {
+        ESP_LOGE(TAG, "Invalid parameter: %d\r\n", mode);
+        return ESP_AT_RESULT_CODE_ERROR;
+    }
+
+    g_wlmode = mode;
+    nvs_read_data_from_flash(&net_para);
+    if (net_para.mode != mode) {
+        net_para.mode = mode;
+        nvs_write_data_to_flash(&net_para);
+    }
+
+    return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_exec_getwlmode(uint8_t *cmd_name)
+{
+    uint8_t buffer[TEMP_BUFFER_SIZE] = {0};
+    struct store_para net_para = {0};
+
+    nvs_read_data_from_flash(&net_para);
+    ESP_LOGI(TAG, "Get wlmode: %d\n", net_para.mode);
+    snprintf((char *)buffer, TEMP_BUFFER_SIZE, "wlmod:%d\r\n", net_para.mode);
+    esp_at_rhzl_write_data(buffer, strlen((char *)buffer));
+    return ESP_AT_RESULT_CODE_OK;
+}
+
 static uint8_t at_exec_reset(uint8_t *cmd_name)
 {
     ESP_LOGI(TAG, "Reboot ...");
@@ -518,6 +591,8 @@ static const esp_at_cmd_struct s_at_rhzl_cmd[] = {
     {"+CLOSESOCKET",        NULL, NULL, NULL, at_exec_closesocket},         // close socket connect
     {"+WIFISTARTSCANNING",  NULL, NULL, NULL, at_exec_wifiscan},            // scan ap list
     {"+GETVERSION",         NULL, at_query_version, NULL, NULL},            // get rhzd software version
+    {"+SETWLMODE",          NULL, at_query_wlmode, at_setup_wlmode, NULL},  // set wlan mode
+    {"+GETWLMODE",          NULL, NULL, NULL, at_exec_getwlmode},           // get wlan mode
     {"+RESET",              NULL, NULL, NULL, at_exec_reset},               // reset
 };
 

@@ -135,9 +135,10 @@ static int32_t at_port_write_data(uint8_t*data,int32_t len)
         return 0;
     #endif
 
-    //if (strncmp((const char*)data, (const char*)"+IND", strlen("+IND")))
-    //    return 0;
-    //length = uart_write_bytes(esp_at_uart_port,(char*)data,len);
+    if (wlmode_is_std()) {
+        length = uart_write_bytes(esp_at_uart_port,(char*)data,len);
+    }
+
     return length;
 }
 

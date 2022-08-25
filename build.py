@@ -194,6 +194,18 @@ def build_project(platform_name, module_name, silence, build_args):
     #   0x2a000 customized_partitions/client_cert.bin 0x2c000 customized_partitions/client_key.bin
     #   0x2e000 customized_partitions/client_ca.bin 0x30000 customized_partitions/factory_param.bin
     with open(os.path.join('build', "flasher_args.json")) as f:
+        '''
+        cmd = 'mv build/bootloader/bootloader.bin build/bootloader/raw_bootloader.bin && espsecure.py encrypt_flash_data \
+            --keyfile my_flash_encryption_key.bin --address 0x1000 --output build/bootloader/bootloader.bin build/bootloader/raw_bootloader.bin'
+        ret = subprocess.call(cmd, shell = True)
+        cmd = 'mv build/partition_table/partition-table.bin build/partition_table/raw_partition-table.bin && espsecure.py encrypt_flash_data \
+            --keyfile my_flash_encryption_key.bin --address 0x8000 --output build/partition_table/partition-table.bin build/partition_table/raw_partition-table.bin'
+        ret = subprocess.call(cmd, shell = True)
+        cmd = 'mv build/esp-at.bin build/raw_esp-at.bin && espsecure.py encrypt_flash_data \
+            --keyfile my_flash_encryption_key.bin --address 0x100000 --output build/esp-at.bin build/raw_esp-at.bin'
+        ret = subprocess.call(cmd, shell = True)
+        '''
+
         target_file = "target.bin"
         def _safe_relpath(path, start=None):
             """ Return a relative path, same as os.path.relpath, but only if this is possible.
@@ -221,6 +233,7 @@ def build_project(platform_name, module_name, silence, build_args):
         cmd = 'esptool.py --chip {0} merge_bin --output {1} --format raw --spi-connection SPI --target-offset 0x0 {2}\
             '.format(idf_target, flasher_path(target_file), flash_bin.strip())
         ret = subprocess.call(cmd, shell = True)
+
         print('esptool.py combine bin ret: {}'.format(ret))
         print(cmd)
         if ret:
