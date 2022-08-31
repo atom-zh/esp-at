@@ -151,7 +151,7 @@ int tcp_send_data(char *data, int32_t len)
 
 int tcp_close_socket(void)
 {
-    //shutdown(wifi.handle, 0);
+    shutdown(wifi.handle, 0);
     if (wifi.handle)
         close(wifi.handle);
     return 0;
@@ -171,7 +171,7 @@ static int tcp_socket_creat(char *host_ip, uint32_t port)
     ip_protocol = IPPROTO_IP;
 
     do {
-        wifi.handle =  socket(addr_family, SOCK_STREAM, ip_protocol);
+        wifi.handle = socket(addr_family, SOCK_STREAM, ip_protocol);
         if (wifi.handle < 0) {
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
@@ -263,6 +263,7 @@ static void tcp_client_task(void *pvParameters)
             case WIFI_READY:
                 if (tcp_socket_creat((char *)&net_para.ip, net_para.port) < 0) {
                     ESP_LOGE(TAG, "creat socket failed %d, retry", ret);
+                    wifi.status = WIFI_DISCONNECT;
                 } else {
                     wifi.status = WIFI_CONNECTED;
                     sprintf((char *)out_buffer, "+IND=TCPC,%s,%d\r\n", net_para.ip, net_para.port);

@@ -1,6 +1,10 @@
 #ifndef __AT_WIFI_RHZL_H__
 #define __AT_WIFI_RHZL_H__
 
+#define WIFI_SSID_MAX_LEN 32
+#define WIFI_PWD_MAX_LEN  64
+#define WIFI_IP_MAX_LEN   16
+
 enum WIFI_MODE {
     WLMODE_UNKNOW = -1,
     WLMODE_STD = 0,
@@ -9,9 +13,9 @@ enum WIFI_MODE {
 };
 
 struct store_para{
-    uint8_t ssid[32];      /**< SSID of target AP. */
-    uint8_t password[64];  /**< Password of target AP. */
-    uint8_t ip[16];
+    uint8_t ssid[WIFI_SSID_MAX_LEN];      /**< SSID of target AP. */
+    uint8_t password[WIFI_PWD_MAX_LEN];  /**< Password of target AP. */
+    uint8_t ip[WIFI_IP_MAX_LEN];
     int32_t port;
     enum WIFI_MODE mode;
 };

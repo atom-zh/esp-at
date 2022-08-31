@@ -337,12 +337,12 @@ static uint8_t at_setup_wlan(uint8_t para_num)
     }
 
     nvs_read_data_from_flash(&net_para);
-    if (memcmp(&net_para.ssid, ssid, strlen((const char *)ssid)) || \
-            memcmp(&net_para.password, passwd, strlen((const char *)passwd)) || \
-            net_para.mode != WLMODE_RHZD) {
+    if (strncmp((const char *)&net_para.ssid, (const char *)ssid, WIFI_SSID_MAX_LEN) ||
+        strncmp((const char *)&net_para.password, (const char*)passwd, WIFI_PWD_MAX_LEN) ||
+        net_para.mode != WLMODE_RHZD) {
         // If you use a custom command to set WIFI, it is considered to be in RHZD mode
         net_para.mode = WLMODE_RHZD;
-        memcpy(&net_para.ssid, ssid, strlen((const char *)ssid) +1 );
+        memcpy(&net_para.ssid, ssid, strlen((const char *)ssid) + 1);
         memcpy(&net_para.password, passwd, strlen((const char *)passwd) + 1);
         nvs_write_data_to_flash(&net_para);
     }
@@ -372,7 +372,7 @@ static uint8_t at_exec_stopwlan(uint8_t *cmd_name)
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
     vEventGroupDelete(s_wifi_event_group);
-    ESP_ERROR_CHECK(esp_wifi_stop() );
+    ESP_ERROR_CHECK(esp_wifi_stop());
     return ESP_AT_RESULT_CODE_OK;
 }
 
@@ -394,8 +394,8 @@ static uint8_t at_setup_setnet(uint8_t para_num)
     }
 
     nvs_read_data_from_flash(&net_para);
-    if (memcmp(&net_para.ip, ip_addr, strlen((const char *)ip_addr)) || net_para.port != port) {
-        memcpy(&net_para.ip, (const char *)ip_addr, strlen((const char *)ip_addr));
+    if (strncmp((const char *)&net_para.ip, (const char *)ip_addr, WIFI_IP_MAX_LEN) || net_para.port != port) {
+        memcpy(&net_para.ip, (const char *)ip_addr, strlen((const char *)ip_addr) + 1);
         net_para.port = port;
         nvs_write_data_to_flash(&net_para);
     }
